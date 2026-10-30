@@ -70,6 +70,7 @@ model User {
   rider         Rider?
   refreshTokens RefreshToken[]
   auditLogs     AuditLog[]
+  createdDeliveries Delivery[] @relation("DeliveryCreator")
 }
 
 model Business {
@@ -86,6 +87,9 @@ model Business {
 
   owner   User             @relation(fields: [ownerUserId], references: [id])
   members BusinessMember[]
+  deliveries Delivery[]
+  wallet Wallet?
+  payments Payment[]
 }
 
 model BusinessMember {
@@ -124,6 +128,10 @@ model Rider {
 
   user      User            @relation(fields: [userId], references: [id])
   documents RiderDocument[]
+  deliveries Delivery[]
+  assignments DeliveryAssignment[]
+  wallet Wallet?
+  payoutRequests PayoutRequest[]
 
   @@index([isOnline, serviceArea])
 }
@@ -170,4 +178,276 @@ model AuditLog {
 
   @@index([entityType, entityId])
   @@index([adminUserId, createdAt])
+}
+
+enum DeliveryStatus {
+  SEARCHING_RIDER
+  ASSIGNED
+  PICKED_UP
+  IN_TRANSIT
+  DELIVERED
+  FAILED
+  CANCELLED
+  RETURNED
+}
+
+enum ActorType {
+  SYSTEM
+  RIDER
+  BUSINESS
+  ADMIN
+}
+
+// A service area modelled as a circle (centre + radius). Simple for now;
+// it can become a polygon later without changing how deliveries use it.
+model Zone {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  centerLat Float
+  centerLng Float
+  radiusKm  Float
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  rateCards  RateCard[]
+  deliveries Delivery[]
+}
+
+// All money fields are integers in kobo (100 kobo = 1 naira)
+model RateCard {
+  id               String      @id @default(uuid()) @db.Uuid
+  zoneId           String      @db.Uuid
+  vehicleType      VehicleType
+  baseFee          Int
+  perKmFee         Int
+  perKgFee         Int         @default(0)
+  includedWeightKg Float       @default(0)
+  maxWeightKg      Float
+  minFee           Int         @default(0)
+  isActive         Boolean     @default(true)
+  updatedAt        DateTime    @updatedAt
+
+  zone Zone @relation(fields: [zoneId], references: [id])
+
+  @@unique([zoneId, vehicleType])
+}
+
+model Delivery {
+  id              String   @id @default(uuid()) @db.Uuid
+  trackingCode    String   @unique
+  businessId      String   @db.Uuid
+  createdByUserId String   @db.Uuid
+
+  pickupAddress      String
+  pickupLat          Float
+  pickupLng          Float
+  pickupContactName  String
+  pickupContactPhone String
+
+  dropoffAddress String
+  dropoffLat     Float
+  dropoffLng     Float
+  recipientName  String
+  recipientPhone String
+
+  packageDescription String
+  weightKg           Float
+  declaredValue      Int?
+  isFragile          Boolean @default(false)
+  notes              String?
+
+  status      DeliveryStatus @default(SEARCHING_RIDER)
+  vehicleType VehicleType
+  zoneId      String         @db.Uuid
+  riderId     String?        @db.Uuid
+  distanceKm  Float
+
+  // Snapshotted at creation so later rate changes never alter past deliveries
+  price             Int
+  commissionAmount  Int
+  riderPayoutAmount Int
+
+  searchStartedAt DateTime @default(now())
+  chargedAt DateTime?
+  settledAt DateTime?
+  refundedAt DateTime?
+  deliveryOtpHash String?
+  assignedAt      DateTime?
+  pickedUpAt      DateTime?
+  deliveredAt     DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  business  Business        @relation(fields: [businessId], references: [id])
+  createdBy User            @relation("DeliveryCreator", fields: [createdByUserId], references: [id])
+  zone      Zone            @relation(fields: [zoneId], references: [id])
+  rider     Rider?          @relation(fields: [riderId], references: [id])
+  events    DeliveryEvent[]
+  assignments DeliveryAssignment[]
+
+  @@index([businessId, status])
+  @@index([riderId, status])
+  @@index([status, createdAt])
+}
+
+// One row per status change: the single source of truth for the timeline
+model DeliveryEvent {
+  id         String         @id @default(uuid()) @db.Uuid
+  deliveryId String         @db.Uuid
+  status     DeliveryStatus
+  actorType  ActorType
+  actorId    String?        @db.Uuid
+  note       String?
+  latitude   Float?
+  longitude  Float?
+  createdAt  DateTime       @default(now())
+
+  delivery Delivery @relation(fields: [deliveryId], references: [id])
+
+  @@index([deliveryId, createdAt])
+}
+
+enum AssignmentStatus {
+  OFFERED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CANCELLED
+}
+
+// Every job offer ever made. The unique pair guarantees a rider is never offered
+// the same delivery twice, and the history shows acceptance rates and decline reasons.
+model DeliveryAssignment {
+  id            String           @id @default(uuid()) @db.Uuid
+  deliveryId    String           @db.Uuid
+  riderId       String           @db.Uuid
+  status        AssignmentStatus @default(OFFERED)
+  offeredAt     DateTime         @default(now())
+  expiresAt     DateTime
+  respondedAt   DateTime?
+  declineReason String?
+
+  delivery Delivery @relation(fields: [deliveryId], references: [id])
+  rider    Rider    @relation(fields: [riderId], references: [id])
+
+  @@unique([deliveryId, riderId])
+  @@index([riderId, status])
+  @@index([status, expiresAt])
+}
+
+enum WalletOwnerType {
+  BUSINESS
+  RIDER
+  PLATFORM
+  ESCROW
+}
+
+enum EntryDirection {
+  CREDIT
+  DEBIT
+}
+
+enum EntryType {
+  TOPUP
+  DELIVERY_CHARGE
+  ESCROW_HOLD
+  ESCROW_RELEASE
+  REFUND
+  RIDER_EARNING
+  COMMISSION
+  WITHDRAWAL
+  WITHDRAWAL_REVERSAL
+  ADJUSTMENT
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum PayoutStatus {
+  REQUESTED
+  APPROVED
+  PAID
+  REJECTED
+}
+
+// One wallet per business, one per rider, plus two system wallets (PLATFORM, ESCROW).
+// "balance" is a running total; the real record is the list of WalletEntry rows.
+// All amounts are BigInt in kobo.
+model Wallet {
+  id         String          @id @default(uuid()) @db.Uuid
+  ownerType  WalletOwnerType
+  businessId String?         @unique @db.Uuid
+  riderId    String?         @unique @db.Uuid
+  systemKey  String?         @unique
+  balance    BigInt          @default(0)
+  createdAt  DateTime        @default(now())
+
+  business Business?    @relation(fields: [businessId], references: [id])
+  rider    Rider?       @relation(fields: [riderId], references: [id])
+  entries  WalletEntry[]
+
+  @@index([ownerType])
+}
+
+// The ledger. Rows are only ever added, never edited or deleted.
+// "reference" is unique, which makes every posting safe to retry.
+model WalletEntry {
+  id           String         @id @default(uuid()) @db.Uuid
+  walletId     String         @db.Uuid
+  type         EntryType
+  direction    EntryDirection
+  amount       BigInt
+  balanceAfter BigInt
+  reference    String         @unique
+  deliveryId   String?        @db.Uuid
+  note         String?
+  createdAt    DateTime       @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id])
+
+  @@index([walletId, createdAt])
+  @@index([deliveryId])
+}
+
+// A wallet top-up attempt through a payment provider
+model Payment {
+  id         String        @id @default(uuid()) @db.Uuid
+  businessId String        @db.Uuid
+  reference  String        @unique
+  amount     BigInt
+  email      String
+  gateway    String
+  status     PaymentStatus @default(PENDING)
+  createdAt  DateTime      @default(now())
+  paidAt     DateTime?
+
+  business Business @relation(fields: [businessId], references: [id])
+
+  @@index([businessId, createdAt])
+}
+
+model PayoutRequest {
+  id              String       @id @default(uuid()) @db.Uuid
+  riderId         String       @db.Uuid
+  amount          BigInt
+  bankName        String
+  accountNumber   String
+  accountName     String
+  status          PayoutStatus @default(REQUESTED)
+  rejectionReason String?
+  bankReference   String?
+  requestedAt     DateTime     @default(now())
+  reviewedById    String?      @db.Uuid
+  reviewedAt      DateTime?
+  paidAt          DateTime?
+
+  rider Rider @relation(fields: [riderId], references: [id])
+
+  @@index([status, requestedAt])
+  @@index([riderId, requestedAt])
 }
