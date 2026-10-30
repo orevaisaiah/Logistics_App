@@ -1,0 +1,173 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  BUSINESS_USER
+  RIDER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum MemberRole {
+  OWNER
+  DISPATCHER
+  FINANCE
+  VIEWER
+}
+
+enum VehicleType {
+  BIKE
+  TRICYCLE
+  CAR
+  VAN
+}
+
+enum DocumentType {
+  ID
+  LICENCE
+  VEHICLE_PAPERS
+  SELFIE
+  GUARANTOR_FORM
+}
+
+enum DocumentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  phone           String    @unique
+  email           String?   @unique
+  fullName        String?
+  role            UserRole
+  status          UserStatus @default(ACTIVE)
+  passwordHash    String?
+  phoneVerifiedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  ownedBusiness Business?
+  memberships   BusinessMember[]
+  rider         Rider?
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+}
+
+model Business {
+  id                 String             @id @default(uuid()) @db.Uuid
+  ownerUserId        String             @unique @db.Uuid
+  companyName        String
+  registrationNumber String?
+  businessType       String?
+  address            String?
+  logoUrl            String?
+  verificationStatus VerificationStatus @default(PENDING)
+  creditLimit        Int                @default(0)
+  createdAt          DateTime           @default(now())
+
+  owner   User             @relation(fields: [ownerUserId], references: [id])
+  members BusinessMember[]
+}
+
+model BusinessMember {
+  id         String     @id @default(uuid()) @db.Uuid
+  businessId String     @db.Uuid
+  userId     String     @db.Uuid
+  role       MemberRole
+  invitedAt  DateTime   @default(now())
+
+  business Business @relation(fields: [businessId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@unique([businessId, userId])
+}
+
+model Rider {
+  id                 String             @id @default(uuid()) @db.Uuid
+  userId             String             @unique @db.Uuid
+  dateOfBirth        DateTime?
+  address            String?
+  vehicleType        VehicleType?
+  plateNumber        String?
+  serviceArea        String?
+  verificationStatus VerificationStatus @default(PENDING)
+  rejectionReason    String?
+  submittedAt        DateTime?
+  isOnline           Boolean            @default(false)
+  currentLat         Float?
+  currentLng         Float?
+  lastSeenAt         DateTime?
+  avgRating          Float              @default(0)
+  bankName           String?
+  accountNumber      String?
+  accountName        String?
+  createdAt          DateTime           @default(now())
+
+  user      User            @relation(fields: [userId], references: [id])
+  documents RiderDocument[]
+
+  @@index([isOnline, serviceArea])
+}
+
+model RiderDocument {
+  id           String         @id @default(uuid()) @db.Uuid
+  riderId      String         @db.Uuid
+  type         DocumentType
+  fileUrl      String
+  status       DocumentStatus @default(PENDING)
+  reviewedById String?        @db.Uuid
+  reviewedAt   DateTime?
+  note         String?
+  createdAt    DateTime       @default(now())
+
+  rider Rider @relation(fields: [riderId], references: [id])
+
+  @@index([riderId])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  adminUserId String   @db.Uuid
+  action      String
+  entityType  String
+  entityId    String
+  meta        Json?
+  createdAt   DateTime @default(now())
+
+  admin User @relation(fields: [adminUserId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([adminUserId, createdAt])
+}
