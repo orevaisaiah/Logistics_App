@@ -2,6 +2,7 @@ import type { PayoutStatus } from '@prisma/client'
 import { prisma } from '../../lib/prisma.js'
 import { audit } from '../../lib/audit.js'
 import { AppError } from '../../lib/errors.js'
+import { config } from '../../config.js'
 import { getRiderWallet, post } from './ledger.js'
 
 // Smallest withdrawal: 1,000 naira
@@ -82,6 +83,13 @@ export async function approveWithdrawal(adminId: string, id: string) {
 
 // Step 2: after the bank transfer has actually been made, record it
 export async function markWithdrawalPaid(adminId: string, id: string, bankReference: string) {
+  // Two-person rule: whoever approved a payout cannot be the one who records it as paid
+  if (config.PAYOUT_TWO_PERSON_RULE) {
+    const request = await prisma.payoutRequest.findUnique({ where: { id }, select: { status: true, reviewedById: true } })
+    if (request?.status === 'APPROVED' && request.reviewedById === adminId) {
+      throw new AppError(403, 'SAME_ADMIN', 'A different admin must record the payment of a withdrawal that you approved')
+    }
+  }
   const result = await prisma.payoutRequest.updateMany({
     where: { id, status: 'APPROVED' },
     data: { status: 'PAID', bankReference, paidAt: new Date() },

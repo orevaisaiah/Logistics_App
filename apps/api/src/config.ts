@@ -6,6 +6,12 @@ const optionalText = z
   .optional()
   .transform((v) => (v && v.trim() !== '' ? v.trim() : undefined))
 
+const flag = (fallback: 'true' | 'false') =>
+  z
+    .enum(['true', 'false'])
+    .default(fallback)
+    .transform((v) => v === 'true')
+
 const schema = z
   .object({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -27,18 +33,31 @@ const schema = z
     DISPATCH_TIMEOUT_MINUTES: z.coerce.number().min(1).max(240).default(15),
     // A rider whose location is older than this is treated as offline
     LOCATION_STALE_SECONDS: z.coerce.number().int().min(30).max(900).default(120),
-    DISPATCH_WORKER_ENABLED: z
-      .enum(['true', 'false'])
-      .default('true')
-      .transform((v) => v === 'true'),
+    DISPATCH_WORKER_ENABLED: flag('true'),
 
     // Payments. Without a Paystack key, development uses a built-in fake gateway.
     PAYSTACK_SECRET_KEY: optionalText,
     PAYSTACK_CALLBACK_URL: optionalText,
+
+    // Security
+    // Comma-separated web addresses allowed to call the API from a browser,
+    // for example https://app.example.com,https://admin.example.com
+    CORS_ORIGINS: optionalText.transform((v) => (v ? v.split(',').map((o) => o.trim()).filter(Boolean) : [])),
+    // Turn on when the API runs behind a proxy or load balancer, so each caller's real IP is used
+    TRUST_PROXY: flag('false'),
+    // The admin who approves a withdrawal cannot be the one who records it as paid.
+    // Default: on in production, off in development (so one person can test alone).
+    PAYOUT_TWO_PERSON_RULE: z.enum(['true', 'false']).optional(),
   })
   .refine((c) => c.NODE_ENV !== 'production' || Boolean(c.PAYSTACK_SECRET_KEY), {
     message: 'PAYSTACK_SECRET_KEY is required in production',
     path: ['PAYSTACK_SECRET_KEY'],
   })
 
-export const config = schema.parse(process.env)
+const parsed = schema.parse(process.env)
+
+export const config = {
+  ...parsed,
+  PAYOUT_TWO_PERSON_RULE:
+    parsed.PAYOUT_TWO_PERSON_RULE !== undefined ? parsed.PAYOUT_TWO_PERSON_RULE === 'true' : parsed.NODE_ENV === 'production',
+}

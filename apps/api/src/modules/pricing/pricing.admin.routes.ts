@@ -26,7 +26,7 @@ const zoneParams = z.object({ zoneId: z.string().uuid() })
 const rateParams = z.object({ zoneId: z.string().uuid(), vehicleType: z.enum(VEHICLE_TYPES) })
 
 export const adminPricingRoutes: FastifyPluginAsync = async (app) => {
-  app.addHook('preHandler', app.requireRole('ADMIN'))
+  app.addHook('preHandler', app.requireAdmin('OPS'))
 
   app.post('/admin/zones', async (req, reply) => {
     const body = zoneBody.parse(req.body)

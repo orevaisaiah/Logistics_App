@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { DELIVERY_STATUSES, latSchema, lngSchema, pageQuery, phoneSchema, VEHICLE_TYPES } from '../../lib/schemas.js'
+import { withIdempotency } from '../../lib/idempotency.js'
 import * as deliveries from './delivery.service.js'
 import { trackDelivery } from './delivery.service.js'
 
@@ -53,7 +54,8 @@ export const deliveryRoutes: FastifyPluginAsync = async (app) => {
 
   app.post('/deliveries', async (req, reply) => {
     const body = createBody.parse(req.body)
-    return reply.code(201).send(await deliveries.createDelivery(req.user.sub, body))
+    const created = await withIdempotency(req, reply, 'deliveries.create', body, () => deliveries.createDelivery(req.user.sub, body))
+    return reply.code(201).send(created)
   })
 
   app.get('/deliveries', async (req) => deliveries.listDeliveries(req.user.sub, listQuery.parse(req.query)))
@@ -72,7 +74,7 @@ export const deliveryRoutes: FastifyPluginAsync = async (app) => {
 
 // Public, no login: anyone with the tracking code can see progress
 export const trackingRoutes: FastifyPluginAsync = async (app) => {
-  app.get('/track/:code', async (req) => {
+  app.get('/track/:code', { config: { rateLimit: { max: 60, timeWindow: '1 minute', keyGenerator: (r) => r.ip } } }, async (req) => {
     const { code } = z.object({ code: z.string().trim().regex(/^[A-Za-z0-9-]{6,20}$/) }).parse(req.params)
     return trackDelivery(code)
   })

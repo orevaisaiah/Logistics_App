@@ -14,7 +14,7 @@ const query = z.object({
 
 // Development helper: tells you exactly why a delivery is not being offered to a rider
 export const dispatchAdminRoutes: FastifyPluginAsync = async (app) => {
-  app.addHook('preHandler', app.requireRole('ADMIN'))
+  app.addHook('preHandler', app.requireAdmin('OPS'))
 
   app.get('/admin/dispatch/explain', async (req) => {
     if (config.NODE_ENV === 'production') throw new AppError(404, 'NOT_FOUND', 'Not found')

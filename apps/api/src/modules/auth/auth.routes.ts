@@ -25,13 +25,13 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
   const sign = (payload: { sub: string; role: 'BUSINESS_USER' | 'RIDER' | 'ADMIN' }) =>
     app.jwt.sign(payload, { expiresIn: '15m' })
 
-  app.post('/auth/otp/request', async (req) => {
+  app.post('/auth/otp/request', { config: { rateLimit: { max: 20, timeWindow: '1 minute', keyGenerator: (r) => r.ip } } }, async (req) => {
     const { phone } = otpRequestBody.parse(req.body)
     await requestOtp(phone)
     return { ok: true }
   })
 
-  app.post('/auth/otp/verify', async (req) => {
+  app.post('/auth/otp/verify', { config: { rateLimit: { max: 30, timeWindow: '1 minute', keyGenerator: (r) => r.ip } } }, async (req) => {
     const body = otpVerifyBody.parse(req.body)
     return verifyOtp(body, sign)
   })

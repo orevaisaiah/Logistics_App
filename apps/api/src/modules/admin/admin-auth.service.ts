@@ -32,5 +32,9 @@ export async function adminLogin(phone: string, password: string, sign: SignFn) 
 
   await redis.del(failKey)
   const tokens = await issueTokens(user, sign)
-  return { user: { id: user.id, phone: user.phone, fullName: user.fullName, role: user.role }, ...tokens }
+  return {
+    user: { id: user.id, phone: user.phone, fullName: user.fullName, role: user.role, adminRole: user.adminRole },
+    mustChangePassword: user.mustChangePassword,
+    ...tokens,
+  }
 }

@@ -1,9 +1,9 @@
 import crypto from 'node:crypto'
 import type { EntryDirection, WalletOwnerType } from '@prisma/client'
-import { prisma } from '../../lib/prisma'
-import { AppError } from '../../lib/errors'
-import { getBusinessWallet, getRiderWallet, post } from './ledger'
-import { getBusinessContext } from './membership'
+import { prisma } from '../../lib/prisma.js'
+import { AppError } from '../../lib/errors.js'
+import { getBusinessWallet, getRiderWallet, post } from './ledger.js'
+import { getBusinessContext } from './membership.js'
 
 type Page = { page: number; limit: number }
 

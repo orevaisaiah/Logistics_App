@@ -16,8 +16,10 @@
   "type": "module",
   "dependencies": {
     "@fastify/cors": "^11.3.1",
+    "@fastify/helmet": "^13.2.0",
     "@fastify/jwt": "^10.2.5",
     "@fastify/multipart": "^10.1.4",
+    "@fastify/rate-limit": "^11.2.2",
     "@prisma/client": "^6.19.3",
     "bullmq": "^6.3.17",
     "fastify": "^5.12.7",

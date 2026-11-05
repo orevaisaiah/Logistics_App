@@ -61,6 +61,8 @@ model User {
   role            UserRole
   status          UserStatus @default(ACTIVE)
   passwordHash    String?
+  adminRole       AdminRole?
+  mustChangePassword Boolean @default(false)
   phoneVerifiedAt DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -116,6 +118,8 @@ model Rider {
   verificationStatus VerificationStatus @default(PENDING)
   rejectionReason    String?
   submittedAt        DateTime?
+  suspendedAt        DateTime?
+  suspensionReason   String?
   isOnline           Boolean            @default(false)
   currentLat         Float?
   currentLng         Float?
@@ -315,6 +319,7 @@ enum AssignmentStatus {
   DECLINED
   EXPIRED
   CANCELLED
+  RIDER_CANCELLED
 }
 
 // Every job offer ever made. The unique pair guarantees a rider is never offered
@@ -450,4 +455,27 @@ model PayoutRequest {
 
   @@index([status, requestedAt])
   @@index([riderId, requestedAt])
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  OPS
+  FINANCE
+  SUPPORT
+  VERIFICATION
+}
+
+// Remembers requests that carried an Idempotency-Key, so a retry returns the first result
+// instead of doing the work (and moving the money) a second time.
+model IdempotencyRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  scope       String
+  key         String
+  requestHash String
+  response    Json?
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, scope, key])
+  @@index([createdAt])
 }

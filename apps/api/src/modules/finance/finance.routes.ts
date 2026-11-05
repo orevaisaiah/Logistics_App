@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { AppError } from '../../lib/errors.js'
 import { config } from '../../config.js'
+import { withIdempotency } from '../../lib/idempotency.js'
 import { pageQuery } from '../../lib/schemas.js'
 import { completeTopup, createTopup, verifyOwnTopup } from './topup.service.js'
 import { verifyPaystackSignature } from './signature.js'
@@ -30,7 +31,8 @@ export const businessWalletRoutes: FastifyPluginAsync = async (app) => {
 
   app.post('/wallet/topups', async (req, reply) => {
     const body = topupBody.parse(req.body)
-    return reply.code(201).send(await createTopup(req.user.sub, body))
+    const topup = await withIdempotency(req, reply, 'topups.create', body, () => createTopup(req.user.sub, body))
+    return reply.code(201).send(topup)
   })
 
   // Call this after paying (or let the webhook do it). Safe to call repeatedly.
@@ -49,7 +51,8 @@ export const riderWalletRoutes: FastifyPluginAsync = async (app) => {
 
   app.post('/rider/withdrawals', async (req, reply) => {
     const { amount } = withdrawalBody.parse(req.body)
-    return reply.code(201).send(await withdrawals.requestWithdrawal(req.user.sub, amount))
+    const request = await withIdempotency(req, reply, 'withdrawals.create', { amount }, () => withdrawals.requestWithdrawal(req.user.sub, amount))
+    return reply.code(201).send(request)
   })
 
   app.get('/rider/withdrawals', async (req) => withdrawals.listMyWithdrawals(req.user.sub))
@@ -61,7 +64,7 @@ export const paystackWebhookRoutes: FastifyPluginAsync = async (app) => {
   app.removeContentTypeParser('application/json')
   app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (_req, body, done) => done(null, body))
 
-  app.post('/webhooks/paystack', async (req, reply) => {
+  app.post('/webhooks/paystack', { config: { rateLimit: false } }, async (req, reply) => {
     const secret = config.PAYSTACK_SECRET_KEY
     if (!secret) throw new AppError(404, 'NOT_FOUND', 'Not found')
 

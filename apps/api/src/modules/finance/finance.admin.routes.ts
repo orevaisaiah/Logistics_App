@@ -28,10 +28,13 @@ const withdrawalListQuery = z.object({
 })
 
 const rejectBody = z.object({ reason: z.string().trim().min(5).max(300) })
+
+// Finance staff may correct a wallet by up to 100,000 naira on their own. Larger corrections need a super admin.
+const FINANCE_ADJUSTMENT_LIMIT_KOBO = 10_000_000
 const paidBody = z.object({ bankReference: z.string().trim().min(3).max(100) })
 
 export const financeAdminRoutes: FastifyPluginAsync = async (app) => {
-  app.addHook('preHandler', app.requireRole('ADMIN'))
+  app.addHook('preHandler', app.requireAdmin('FINANCE'))
 
   app.get('/admin/finance/summary', async () => wallet.financeSummary())
 
@@ -45,6 +48,9 @@ export const financeAdminRoutes: FastifyPluginAsync = async (app) => {
   app.post('/admin/wallets/:walletId/adjust', async (req, reply) => {
     const { walletId } = walletParams.parse(req.params)
     const body = adjustBody.parse(req.body)
+    if (req.adminRole !== 'SUPER_ADMIN' && body.amount > FINANCE_ADJUSTMENT_LIMIT_KOBO) {
+      throw new AppError(403, 'AMOUNT_ABOVE_LIMIT', 'Adjustments above 100,000 naira need a super admin')
+    }
     return reply.code(201).send(await wallet.adminAdjust(req.user.sub, walletId, body))
   })
 

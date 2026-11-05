@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma.js'
 import { config } from '../../config.js'
 import { boundingBox, rankByDistance } from './geo.js'
 import { runFinanceCycle } from '../finance/settlement.js'
+import { purgeIdempotencyRecords } from '../../lib/idempotency.js'
 
 // A rider with a delivery in any of these states is busy and gets no new offers
 export const ACTIVE_JOB_STATUSES: DeliveryStatus[] = ['ASSIGNED', 'PICKED_UP', 'IN_TRANSIT']
@@ -134,6 +135,9 @@ export async function runDispatchCycle(log: Logger) {
 
     // 4. Money: pay riders for delivered jobs and refund cancelled ones that the request missed
     await runFinanceCycle(log)
+
+    // 5. Housekeeping: forget retry records older than two days
+    await purgeIdempotencyRecords().catch((err) => log.error(err, 'idempotency cleanup failed'))
   } catch (err) {
     log.error(err, 'dispatch cycle failed')
   } finally {

@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
-import * as admin from "./admin-riders.service.js";
+import * as admin from './admin-riders.service.js'
 
 const riderParams = z.object({ riderId: z.string().uuid() })
 const documentParams = z.object({ riderId: z.string().uuid(), docId: z.string().uuid() })
@@ -24,7 +24,7 @@ const reviewBody = z
 const rejectBody = z.object({ reason: z.string().trim().min(5).max(500) })
 
 export const adminRoutes: FastifyPluginAsync = async (app) => {
-  app.addHook('preHandler', app.requireRole('ADMIN'))
+  app.addHook('preHandler', app.requireAdmin('VERIFICATION'))
 
   app.get('/admin/riders', async (req) => admin.listRiders(listQuery.parse(req.query)))
 

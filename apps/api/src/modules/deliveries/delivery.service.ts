@@ -109,6 +109,14 @@ export async function quoteDelivery(
 export async function createDelivery(userId: string, input: CreateDeliveryInput) {
   const { businessId } = await getMembership(userId, CAN_CREATE)
 
+  const business = await prisma.business.findUniqueOrThrow({
+    where: { id: businessId },
+    select: { verificationStatus: true },
+  })
+  if (business.verificationStatus === 'SUSPENDED' || business.verificationStatus === 'REJECTED') {
+    throw new AppError(403, 'BUSINESS_SUSPENDED', 'Your business account cannot create deliveries. Contact support.')
+  }
+
   // The price is always recalculated here. The client never sends it, so it cannot be tampered with.
   const quote = await calculateQuote({
     pickup: input.pickup,

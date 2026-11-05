@@ -11,7 +11,7 @@ const listQuery = z.object({
 })
 
 export const adminDeliveryRoutes: FastifyPluginAsync = async (app) => {
-  app.addHook('preHandler', app.requireRole('ADMIN'))
+  app.addHook('preHandler', app.requireAdmin('OPS', 'SUPPORT', 'FINANCE'))
 
   app.get('/admin/deliveries', async (req) => {
     const { page, limit, status, businessId } = listQuery.parse(req.query)

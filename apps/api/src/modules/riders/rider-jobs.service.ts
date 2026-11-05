@@ -335,7 +335,7 @@ export async function riderCancel(userId: string, deliveryId: string, reason: st
     }
     await tx.deliveryAssignment.updateMany({
       where: { deliveryId, riderId: rider.id, status: 'ACCEPTED' },
-      data: { status: 'CANCELLED' },
+      data: { status: 'RIDER_CANCELLED' },
     })
     await tx.deliveryEvent.create({
       data: {

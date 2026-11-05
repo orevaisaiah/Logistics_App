@@ -1,11 +1,15 @@
 import "./lib/bigint.js";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
+import { Redis } from "ioredis";
 import multipart from "@fastify/multipart";
 import { ZodError } from "zod";
 import { config } from "./config.js";
 import { prisma } from "./lib/prisma.js";
 import { redis } from "./lib/redis.js";
+import { clientKey } from "./lib/rate-limit.js";
 import { AppError } from "./lib/errors.js";
 import { setupAuth } from "./plugins/auth.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
@@ -28,11 +32,34 @@ import {
   riderWalletRoutes,
 } from "./modules/finance/finance.routes.js";
 import { financeAdminRoutes } from "./modules/finance/finance.admin.routes.js";
+import { adminOpsRoutes } from "./modules/admin/admin-ops.routes.js";
+import { adminSelfRoutes, staffRoutes } from "./modules/admin/staff.routes.js";
 
 async function main() {
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: true, trustProxy: config.TRUST_PROXY });
 
-  await app.register(cors, { origin: true });
+  // Browsers may only call the API from the addresses listed in CORS_ORIGINS. In development, any address is allowed.
+  await app.register(cors, {
+    origin:
+      config.CORS_ORIGINS.length > 0
+        ? config.CORS_ORIGINS
+        : config.NODE_ENV !== "production",
+  });
+  await app.register(helmet);
+
+  // A separate Redis connection for rate limiting, set up so a Redis problem never blocks requests
+  const limiterRedis = new Redis(config.REDIS_URL, {
+    connectTimeout: 500,
+    maxRetriesPerRequest: 1,
+  });
+  await app.register(rateLimit, {
+    global: true,
+    max: 600,
+    timeWindow: "1 minute",
+    redis: limiterRedis,
+    skipOnError: true,
+    keyGenerator: (req) => clientKey(req.headers.authorization, req.ip),
+  });
   await app.register(multipart, {
     limits: { fileSize: 5 * 1024 * 1024, files: 1 },
   });
@@ -53,17 +80,39 @@ async function main() {
         .code(err.statusCode)
         .send({ error: { code: err.code, message: err.message } });
     }
-    if (
-      typeof err === "object" &&
-      err !== null &&
-      "code" in err &&
-      err.code === "FST_REQ_FILE_TOO_LARGE"
-    ) {
+    const error = err as {
+      code?: string;
+      statusCode?: number;
+      message?: string;
+    };
+    if (error.code === "P2002") {
+      return reply.code(409).send({
+        error: {
+          code: "ALREADY_EXISTS",
+          message: "A record with these details already exists",
+        },
+      });
+    }
+    if (error.code === "FST_REQ_FILE_TOO_LARGE") {
       return reply.code(413).send({
         error: {
           code: "FILE_TOO_LARGE",
           message: "File must be 5 MB or smaller",
         },
+      });
+    }
+    if (error.statusCode === 429) {
+      return reply.code(429).send({
+        error: {
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many requests. Please slow down and try again shortly.",
+        },
+      });
+    }
+    // Mistakes by the caller that Fastify itself detects (bad JSON, wrong content type) are 4xx, not server errors
+    if (error.statusCode && error.statusCode < 500) {
+      return reply.code(error.statusCode).send({
+        error: { code: error.code ?? "BAD_REQUEST", message: error.message },
       });
     }
     req.log.error(err);
@@ -78,6 +127,7 @@ async function main() {
     stopWorker();
     await prisma.$disconnect();
     redis.disconnect();
+    limiterRedis.disconnect();
   });
 
   app.get("/health", async () => ({ status: "ok" }));
@@ -95,7 +145,20 @@ async function main() {
   await app.register(businessWalletRoutes, { prefix: "/v1" });
   await app.register(riderWalletRoutes, { prefix: "/v1" });
   await app.register(financeAdminRoutes, { prefix: "/v1" });
+  await app.register(adminOpsRoutes, { prefix: "/v1" });
+  await app.register(staffRoutes, { prefix: "/v1" });
+  await app.register(adminSelfRoutes, { prefix: "/v1" });
   await app.register(paystackWebhookRoutes, { prefix: "/v1" });
+
+  // Admins created before roles existed become super admins once. New admins always get an explicit role.
+  const upgraded = await prisma.user.updateMany({
+    where: { role: "ADMIN", adminRole: null },
+    data: { adminRole: "SUPER_ADMIN" },
+  });
+  if (upgraded.count > 0)
+    app.log.warn(
+      `${upgraded.count} existing admin account(s) were made SUPER_ADMIN`,
+    );
 
   await app.listen({ port: config.PORT, host: "0.0.0.0" });
 
