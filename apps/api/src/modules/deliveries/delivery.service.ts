@@ -6,6 +6,8 @@ import { AppError } from '../../lib/errors.js'
 import { calculateQuote, toBusinessQuote } from '../pricing/pricing.service.js'
 import { dispatchDelivery } from '../dispatch/dispatch.service.js'
 import { chargeDelivery, refundDelivery } from '../finance/settlement.js'
+import { notifyRider } from '../../lib/push.js'
+import { jobCancelledMessage } from '../../lib/push-messages.js'
 
 // No I, L, O, U, 0 or 1, so codes are easy to read out over the phone
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTVWXYZ23456789'
@@ -253,6 +255,8 @@ export async function cancelDelivery(userId: string, deliveryId: string, reason:
       data: { deliveryId, status: 'CANCELLED', actorType: 'BUSINESS', actorId: userId, note: reason },
     })
   })
+  if (delivery.riderId && delivery.status === 'ASSIGNED') void notifyRider(delivery.riderId, jobCancelledMessage())
+
   // Give the money back. If this fails, the background worker retries it within seconds.
   await refundDelivery(deliveryId).catch((err) => console.error('refund failed, will retry', err))
   return getDelivery(userId, deliveryId)

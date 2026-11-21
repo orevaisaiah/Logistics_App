@@ -18,6 +18,7 @@ export async function explainDispatch(deliveryId?: string) {
     offerSeconds: config.OFFER_SECONDS,
     radiusKm: config.DISPATCH_RADIUS_KM,
     locationMaxAgeSeconds: config.LOCATION_STALE_SECONDS,
+    locationMaxAgeWithPushSeconds: config.PUSH_REACHABLE_STALE_SECONDS,
     searchTimeoutMinutes: config.DISPATCH_TIMEOUT_MINUTES,
     workerEnabled: config.DISPATCH_WORKER_ENABLED,
   }
@@ -34,7 +35,7 @@ export async function explainDispatch(deliveryId?: string) {
 
   const riders = await prisma.rider.findMany({
     include: {
-      user: { select: { phone: true, status: true } },
+      user: { select: { phone: true, status: true, _count: { select: { pushTokens: true } } } },
       deliveries: { where: { status: { in: ACTIVE_JOB_STATUSES } }, select: { id: true, status: true } },
       assignments: { select: { deliveryId: true, status: true, expiresAt: true } },
     },
@@ -53,8 +54,10 @@ export async function explainDispatch(deliveryId?: string) {
       problems.push('no location has ever been sent (lastSeenAt is empty)')
     } else {
       const ageSeconds = Math.round((now.getTime() - r.lastSeenAt.getTime()) / 1000)
-      if (ageSeconds > config.LOCATION_STALE_SECONDS) {
-        problems.push(`location is ${ageSeconds}s old, the limit is ${config.LOCATION_STALE_SECONDS}s. Send POST /v1/rider/location`)
+      const canBeAlerted = r.user._count.pushTokens > 0
+      const limit = canBeAlerted ? config.PUSH_REACHABLE_STALE_SECONDS : config.LOCATION_STALE_SECONDS
+      if (ageSeconds > limit) {
+        problems.push(`location is ${ageSeconds}s old, the limit is ${limit}s${canBeAlerted ? ' (this rider can be alerted by push)' : ''}. Send POST /v1/rider/location`)
       }
     }
 

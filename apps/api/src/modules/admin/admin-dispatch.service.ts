@@ -2,6 +2,8 @@ import { prisma } from '../../lib/prisma.js'
 import { AppError } from '../../lib/errors.js'
 import { ACTIVE_JOB_STATUSES, dispatchDelivery } from '../dispatch/dispatch.service.js'
 import { refundDelivery } from '../finance/settlement.js'
+import { notifyRider } from '../../lib/push.js'
+import { assignedMessage, jobCancelledMessage } from '../../lib/push-messages.js'
 import type { Tx } from '../finance/ledger.js'
 
 // Same lock order as automatic dispatch (delivery first, then rider), so they never clash
@@ -64,11 +66,14 @@ export async function assignRider(adminId: string, deliveryId: string, riderId: 
       data: { adminUserId: adminId, action: 'DELIVERY_ASSIGNED', entityType: 'Delivery', entityId: deliveryId, meta: { riderId, note: note ?? null } },
     })
   })
+  const assigned = await prisma.delivery.findUnique({ where: { id: deliveryId }, select: { pickupAddress: true, riderPayoutAmount: true } })
+  if (assigned) void notifyRider(riderId, assignedMessage({ payout: assigned.riderPayoutAmount, pickupAddress: assigned.pickupAddress }))
   return { ok: true, status: 'ASSIGNED' as const }
 }
 
 // Takes the rider off a job that has not been picked up yet and puts it back in the search
 export async function unassignRider(adminId: string, deliveryId: string, reason: string) {
+  const before = await prisma.delivery.findUnique({ where: { id: deliveryId }, select: { riderId: true } })
   await prisma.$transaction(async (tx) => {
     await lock(tx, deliveryId)
     const delivery = await tx.delivery.findUnique({ where: { id: deliveryId } })
@@ -93,6 +98,8 @@ export async function unassignRider(adminId: string, deliveryId: string, reason:
     })
   })
 
+  if (before?.riderId) void notifyRider(before.riderId, jobCancelledMessage())
+
   // The removed rider is never offered this delivery again, so the next best rider gets it
   await dispatchDelivery(deliveryId).catch((err) => console.error('dispatch after unassign failed', err))
   return { ok: true, status: 'SEARCHING_RIDER' as const }
@@ -101,6 +108,7 @@ export async function unassignRider(adminId: string, deliveryId: string, reason:
 // Cancels a delivery that has not been picked up yet, and refunds the business
 export async function adminCancelDelivery(adminId: string, deliveryId: string, reason: string) {
   const open = ['SEARCHING_RIDER', 'ASSIGNED'] as const
+  const before = await prisma.delivery.findUnique({ where: { id: deliveryId }, select: { riderId: true, status: true } })
 
   await prisma.$transaction(async (tx) => {
     await lock(tx, deliveryId)
@@ -123,6 +131,7 @@ export async function adminCancelDelivery(adminId: string, deliveryId: string, r
     })
   })
 
+  if (before?.riderId && before.status === 'ASSIGNED') void notifyRider(before.riderId, jobCancelledMessage())
   await refundDelivery(deliveryId).catch((err) => console.error('refund failed, will retry', err))
   return { ok: true, status: 'CANCELLED' as const }
 }

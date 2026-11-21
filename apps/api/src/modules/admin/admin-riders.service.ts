@@ -4,6 +4,8 @@ import { storage } from '../../lib/storage.js'
 import { audit } from '../../lib/audit.js'
 import { AppError } from '../../lib/errors.js'
 import { REQUIRED_DOCUMENTS } from '../riders/rider.service.js'
+import { notifyRider } from '../../lib/push.js'
+import { approvedMessage, rejectedMessage } from '../../lib/push-messages.js'
 
 type StatusFilter = 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED' | 'ALL'
 
@@ -127,6 +129,7 @@ export async function approveRider(adminId: string, riderId: string) {
       data: { adminUserId: adminId, action: 'RIDER_APPROVED', entityType: 'Rider', entityId: riderId },
     })
   })
+  void notifyRider(riderId, approvedMessage())
   return getRiderDetail(riderId)
 }
 
@@ -143,5 +146,6 @@ export async function rejectRider(adminId: string, riderId: string, reason: stri
       data: { adminUserId: adminId, action: 'RIDER_REJECTED', entityType: 'Rider', entityId: riderId, meta: { reason } },
     })
   })
+  void notifyRider(riderId, rejectedMessage(reason))
   return getRiderDetail(riderId)
 }

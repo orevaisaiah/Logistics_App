@@ -1,6 +1,8 @@
 import { prisma } from '../../lib/prisma.js'
 import { AppError } from '../../lib/errors.js'
 import { dispatchDelivery } from '../dispatch/dispatch.service.js'
+import { notifyRider } from '../../lib/push.js'
+import { suspendedMessage } from '../../lib/push-messages.js'
 import { ratio } from './reports.js'
 
 // Stops a rider from working. Refused while they hold a package (picked up or on the road),
@@ -51,6 +53,7 @@ export async function suspendRider(adminId: string, riderId: string, reason: str
     return freed
   })
 
+  void notifyRider(riderId, suspendedMessage())
   if (freedDeliveryId) await dispatchDelivery(freedDeliveryId).catch((err) => console.error('dispatch after suspension failed', err))
   return { ok: true, status: 'SUSPENDED' as const, freedDeliveryId }
 }

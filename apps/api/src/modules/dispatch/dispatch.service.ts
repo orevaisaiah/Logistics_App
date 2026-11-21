@@ -3,6 +3,9 @@ import { prisma } from '../../lib/prisma.js'
 import { config } from '../../config.js'
 import { boundingBox, rankByDistance } from './geo.js'
 import { runFinanceCycle } from '../finance/settlement.js'
+import { notifyRider } from '../../lib/push.js'
+import { offerMessage } from '../../lib/push-messages.js'
+import { setUnresponsiveRidersOffline } from './auto-offline.js'
 import { purgeIdempotencyRecords } from '../../lib/idempotency.js'
 
 // A rider with a delivery in any of these states is busy and gets no new offers
@@ -25,13 +28,15 @@ export async function dispatchDelivery(deliveryId: string): Promise<boolean> {
   const pickup = { lat: delivery.pickupLat, lng: delivery.pickupLng }
   const box = boundingBox(pickup, config.DISPATCH_RADIUS_KM)
   const freshAfter = new Date(now.getTime() - config.LOCATION_STALE_SECONDS * 1000)
+  const pushFreshAfter = new Date(now.getTime() - config.PUSH_REACHABLE_STALE_SECONDS * 1000)
 
   const riders = await prisma.rider.findMany({
     where: {
       verificationStatus: 'APPROVED',
       isOnline: true,
       vehicleType: delivery.vehicleType,
-      lastSeenAt: { gte: freshAfter },
+      // Available if the app shared its location recently, or if the phone can be alerted by push and its last known location is not too old
+      OR: [{ lastSeenAt: { gte: freshAfter } }, { lastSeenAt: { gte: pushFreshAfter }, user: { pushTokens: { some: {} } } }],
       currentLat: { gte: box.minLat, lte: box.maxLat },
       currentLng: { gte: box.minLng, lte: box.maxLng },
       user: { status: 'ACTIVE' },
@@ -47,7 +52,14 @@ export async function dispatchDelivery(deliveryId: string): Promise<boolean> {
   )
 
   for (const candidate of rankByDistance(located, pickup, config.DISPATCH_RADIUS_KM)) {
-    if (await tryOffer(deliveryId, candidate.id)) return true
+    if (await tryOffer(deliveryId, candidate.id)) {
+      // Alert the rider's phone. Not awaited: push is best effort and must never hold up dispatch.
+      void notifyRider(
+        candidate.id,
+        offerMessage({ payout: delivery.riderPayoutAmount, pickupAddress: delivery.pickupAddress, distanceToPickupKm: candidate.distanceKm, tripKm: delivery.distanceKm, ttlSeconds: config.OFFER_SECONDS }),
+      )
+      return true
+    }
   }
   return false
 }
@@ -87,11 +99,16 @@ export async function runDispatchCycle(log: Logger) {
   try {
     const now = new Date()
 
-    // 1. Offers whose timer ran out
+    // 1. Offers whose timer ran out. Riders who let several in a row go unanswered are set offline.
+    const expiring = await prisma.deliveryAssignment.findMany({
+      where: { status: 'OFFERED', expiresAt: { lte: now } },
+      select: { riderId: true },
+    })
     await prisma.deliveryAssignment.updateMany({
       where: { status: 'OFFERED', expiresAt: { lte: now } },
       data: { status: 'EXPIRED' },
     })
+    await setUnresponsiveRidersOffline([...new Set(expiring.map((e) => e.riderId))], log)
 
     // 2. Give up on deliveries that have searched too long
     const giveUpBefore = new Date(now.getTime() - config.DISPATCH_TIMEOUT_MINUTES * 60 * 1000)

@@ -16,6 +16,7 @@ import { authRoutes } from "./modules/auth/auth.routes.js";
 import { businessRoutes } from "./modules/businesses/business.routes.js";
 import { riderRoutes } from "./modules/riders/rider.routes.js";
 import { riderJobRoutes } from "./modules/riders/rider-jobs.routes.js";
+import { pushRoutes } from "./modules/riders/push.routes.js";
 import { adminAuthRoutes } from "./modules/admin/admin-auth.routes.js";
 import { adminRoutes } from "./modules/admin/admin.routes.js";
 import {
@@ -135,6 +136,7 @@ async function main() {
   await app.register(businessRoutes, { prefix: "/v1" });
   await app.register(riderRoutes, { prefix: "/v1" });
   await app.register(riderJobRoutes, { prefix: "/v1" });
+  await app.register(pushRoutes, { prefix: "/v1" });
   await app.register(adminAuthRoutes, { prefix: "/v1" });
   await app.register(adminRoutes, { prefix: "/v1" });
   await app.register(adminPricingRoutes, { prefix: "/v1" });

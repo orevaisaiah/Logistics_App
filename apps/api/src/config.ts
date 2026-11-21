@@ -35,6 +35,12 @@ const schema = z
     LOCATION_STALE_SECONDS: z.coerce.number().int().min(30).max(900).default(120),
     DISPATCH_WORKER_ENABLED: flag('true'),
 
+    // Push notifications. The token is optional; set it if you turned on "enhanced push security" in your Expo account.
+    EXPO_ACCESS_TOKEN: optionalText,
+    // A rider the phone can reach by push may be offered deliveries even if the app has not shared a fresh
+    // location for this long (the app only shares location while it is open on screen)
+    PUSH_REACHABLE_STALE_SECONDS: z.coerce.number().int().min(60).max(7200).default(900),
+
     // Payments. Without a Paystack key, development uses a built-in fake gateway.
     PAYSTACK_SECRET_KEY: optionalText,
     PAYSTACK_CALLBACK_URL: optionalText,

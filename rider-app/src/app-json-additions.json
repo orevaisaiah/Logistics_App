@@ -1,0 +1,12 @@
+{
+  "_note": "Merge these keys into the existing \"expo\" object in app.json. They are needed for a real build; Expo Go works without them.",
+  "expo": {
+    "name": "Rider",
+    "plugins": [
+      ["expo-location", { "locationWhenInUsePermission": "We use your location to find deliveries near you and to show businesses where your delivery is." }],
+      ["expo-image-picker", { "cameraPermission": "We use the camera to photograph your documents.", "photosPermission": "We use your photos to upload your documents." }],
+      "expo-secure-store"
+    ],
+    "android": { "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "CAMERA"] }
+  }
+}

@@ -3,6 +3,8 @@ import { prisma } from '../../lib/prisma.js'
 import { audit } from '../../lib/audit.js'
 import { AppError } from '../../lib/errors.js'
 import { config } from '../../config.js'
+import { notifyRider } from '../../lib/push.js'
+import { withdrawalPaidMessage, withdrawalRejectedMessage } from '../../lib/push-messages.js'
 import { getRiderWallet, post } from './ledger.js'
 
 // Smallest withdrawal: 1,000 naira
@@ -96,7 +98,9 @@ export async function markWithdrawalPaid(adminId: string, id: string, bankRefere
   })
   if (result.count === 0) throw new AppError(409, 'INVALID_STATE', 'Only an approved withdrawal can be marked as paid')
   await audit(adminId, 'WITHDRAWAL_PAID', 'PayoutRequest', id, { bankReference })
-  return prisma.payoutRequest.findUniqueOrThrow({ where: { id } })
+  const paid = await prisma.payoutRequest.findUniqueOrThrow({ where: { id } })
+  void notifyRider(paid.riderId, withdrawalPaidMessage(Number(paid.amount)))
+  return paid
 }
 
 // Declining returns the money to the rider's wallet
@@ -122,5 +126,7 @@ export async function rejectWithdrawal(adminId: string, id: string, reason: stri
       data: { adminUserId: adminId, action: 'WITHDRAWAL_REJECTED', entityType: 'PayoutRequest', entityId: id, meta: { reason } },
     })
   })
-  return prisma.payoutRequest.findUniqueOrThrow({ where: { id } })
+  const rejected = await prisma.payoutRequest.findUniqueOrThrow({ where: { id } })
+  void notifyRider(rejected.riderId, withdrawalRejectedMessage(Number(rejected.amount), reason))
+  return rejected
 }
